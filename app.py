@@ -2,6 +2,7 @@ import streamlit as st
 import subprocess
 import os
 import tempfile
+import uuid # To create unique filenames
 
 # Use a temporary directory to store uploaded and compressed files
 TEMP_DIR = tempfile.gettempdir()
@@ -10,8 +11,6 @@ def compress_pdf_with_ghostscript(input_path, output_path, quality='ebook'):
     """
     Compresses a PDF using Ghostscript on the server.
     """
-    # CRITICAL CHANGE: On the deployment server, the command is just 'gs'
-    # because it will be installed via packages.txt and available in the system PATH.
     ghostscript_path = 'gs' 
     
     command = [
@@ -27,12 +26,11 @@ def compress_pdf_with_ghostscript(input_path, output_path, quality='ebook'):
     ]
     
     try:
-        # We capture the output to give more detailed error messages if something goes wrong.
         process = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         return True
     except subprocess.CalledProcessError as e:
         st.error("Ghostscript failed during compression.")
-        st.code(f"Error:\n{e.stderr}") # Show the actual error from Ghostscript
+        st.code(f"Error from Ghostscript:\n{e.stderr}")
         return False
     except FileNotFoundError:
         st.error("Could not find the 'gs' command. This means Ghostscript is not installed correctly on the server.")
@@ -47,9 +45,10 @@ st.write("Upload a PDF, choose a compression level, and get your smaller file.")
 uploaded_file = st.file_uploader("Upload a PDF file", type=["pdf"])
 
 if uploaded_file is not None:
-    # Define paths for the temporary original and new compressed file
-    input_pdf_path = os.path.join(TEMP_DIR, uploaded_file.name)
-    output_pdf_path = os.path.join(TEMP_DIR, f"compressed_{uploaded_file.name}")
+    # Create unique file names to avoid conflicts if multiple users were on the app
+    unique_id = uuid.uuid4().hex
+    input_pdf_path = os.path.join(TEMP_DIR, f"{unique_id}_{uploaded_file.name}")
+    output_pdf_path = os.path.join(TEMP_DIR, f"compressed_{unique_id}_{uploaded_file.name}")
     
     # Save the uploaded file to the temporary path
     with open(input_pdf_path, "wb") as f:
@@ -57,7 +56,6 @@ if uploaded_file is not None:
         
     st.markdown("---")
     
-    # UI for selecting compression quality
     quality = st.selectbox(
         "Select Compression Quality",
         ('ebook', 'screen', 'printer', 'prepress'),
@@ -65,7 +63,7 @@ if uploaded_file is not None:
         help="**ebook:** Good balance (Recommended). **screen:** Smallest size."
     )
     
-    compress_button = st.button(f"Compress PDF", type="primary")
+    compress_button = st.button("Compress PDF", type="primary")
 
     if compress_button:
         with st.spinner("Compressing your PDF..."):
@@ -74,10 +72,19 @@ if uploaded_file is not None:
         if success:
             st.success("✅ Compression successful!")
             
+            # **THE FIX IS HERE**
+            # Read the compressed file back into memory as bytes
             with open(output_pdf_path, "rb") as f:
-                st.download_button(
-                    label="⬇️ Download Compressed PDF",
-                    data=f,
-                    file_name=f"compressed_{uploaded_file.name}",
-                    mime="application/pdf"
-                )
+                pdf_bytes = f.read()
+
+            # Provide the bytes directly to the download button
+            st.download_button(
+                label="⬇️ Download Compressed PDF",
+                data=pdf_bytes, # Pass the file's bytes, not a path
+                file_name=f"compressed_{uploaded_file.name}",
+                mime="application/pdf"
+            )
+            
+            # Clean up the temporary files from the server
+            os.remove(input_pdf_path)
+            os.remove(output_pdf_path)
