@@ -11,7 +11,6 @@ def create_download_link(val, filename):
     Generates a download link for a file from its bytes.
     """
     b64 = base64.b64encode(val).decode()
-    # **THE FIX IS HERE:** The MIME type is now 'application/pdf'
     return f'<a href="data:application/pdf;base64,{b64}" download="{filename}">⬇️ Download Your Compressed PDF</a>'
 
 # --- Main Functions ---
@@ -42,14 +41,12 @@ def compress_pdf(input_path, quality):
 st.set_page_config(layout="centered", page_title="PDF Pro")
 st.title("📄 PDF Compressor")
 
-# Initialize state
 if 'pdf_result' not in st.session_state:
     st.session_state.pdf_result = None
 
 uploaded_file = st.file_uploader("Upload a PDF to compress", type=["pdf"])
 
 if uploaded_file:
-    # Clear previous results when a new file is uploaded
     if 'last_file_id' not in st.session_state or st.session_state.last_file_id != uploaded_file.file_id:
         st.session_state.last_file_id = uploaded_file.file_id
         st.session_state.pdf_result = None
@@ -66,15 +63,17 @@ if uploaded_file:
             f.write(uploaded_file.getbuffer())
         
         with st.spinner("Compressing... This may take a moment."):
-            # Store the result directly in session state
             st.session_state.pdf_result = compress_pdf(input_path, quality)
         
-        os.remove(input_path) # Clean up
+        os.remove(input_path)
 
-# Display the download link if compression was successful
+# Display the download link and instructions
 if st.session_state.pdf_result:
-    st.success("✅ Compression successful! Click the link below to download.")
+    st.success("✅ Compression successful!")
+    
+    # **IMPROVED INSTRUCTIONS ARE HERE**
+    st.info("💡 **Right-click the link below and select 'Save Link As...'** to download your file.", icon="ℹ️")
+    
     download_filename = f"compressed_{uploaded_file.name}"
-    # Generate and display the custom HTML download link
     download_link = create_download_link(st.session_state.pdf_result, download_filename)
     st.markdown(download_link, unsafe_allow_html=True)
