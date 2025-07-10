@@ -5,17 +5,28 @@ import tempfile
 import uuid
 import base64
 
-def create_download_link(val, filename):
+def trigger_download(pdf_bytes, filename):
+    """Injects JavaScript to force a file download in the browser."""
+    b64 = base64.b64encode(pdf_bytes).decode()
+    js = f"""
+    <script>
+        // Create a link element
+        const link = document.createElement('a');
+        // Set its properties
+        link.href = 'data:application/pdf;base64,{b64}';
+        link.download = '{filename}';
+        // Append to the body and click it to trigger the download
+        document.body.appendChild(link);
+        link.click();
+        // Clean up by removing the link
+        document.body.removeChild(link);
+    </script>
     """
-    Generates a download link for a file from its bytes using Base64 encoding.
-    """
-    b64 = base64.b64encode(val).decode()
-    return f'<a href="data:application/pdf;base64,{b64}" download="{filename}">⬇️ Download Compressed PDF</a>'
+    # Use st.html to execute the script
+    st.html(js)
 
 def compress_pdf(input_path, quality):
-    """
-    Compresses a PDF using Ghostscript and returns the resulting bytes.
-    """
+    """Compresses a PDF and returns its bytes."""
     output_path = os.path.join(tempfile.gettempdir(), f"compressed_{uuid.uuid4().hex}.pdf")
     ghostscript_path = 'gs'
     command = [
@@ -27,7 +38,7 @@ def compress_pdf(input_path, quality):
         subprocess.run(command, check=True, capture_output=True, text=True)
         with open(output_path, "rb") as f:
             file_bytes = f.read()
-        os.remove(output_path)  # Clean up
+        os.remove(output_path)
         return file_bytes
     except Exception as e:
         st.error(f"An error occurred during compression: {e}")
@@ -42,6 +53,8 @@ st.title("📄 PDF Compressor")
 # Initialize session state
 if 'pdf_result' not in st.session_state:
     st.session_state.pdf_result = None
+if 'file_name' not in st.session_state:
+    st.session_state.file_name = None
 
 uploaded_file = st.file_uploader("1. Upload your PDF file", type=["pdf"])
 
@@ -53,8 +66,7 @@ if uploaded_file:
 
     quality = st.selectbox(
         "2. Select a compression quality",
-        ('ebook', 'screen', 'printer', 'prepress'),
-        help="**ebook:** Good balance (Recommended). **screen:** Smallest size."
+        ('ebook', 'screen', 'printer', 'prepress')
     )
 
     if st.button("3. Compress PDF", type="primary"):
@@ -63,25 +75,21 @@ if uploaded_file:
             f.write(uploaded_file.getbuffer())
 
         with st.spinner("Compressing..."):
-            # Store the result directly in session state
             st.session_state.pdf_result = compress_pdf(input_path, quality)
+            st.session_state.file_name = f"compressed_{uploaded_file.name}"
 
-        os.remove(input_path)  # Clean up
+        os.remove(input_path)
 
         if st.session_state.pdf_result:
-            st.success("✅ Compression successful! Your download link is ready below.")
+            st.success("✅ Compression successful! Press the download button below.")
         else:
             st.error("Compression failed.")
 
-# The download button/link appears only after successful compression
+# The download button appears only after successful compression
 if st.session_state.pdf_result:
     st.markdown("---")
     st.markdown("### 4. Download Your File")
-    
-    # Display instructions for downloading
-    st.info("💡 **On Desktop:** Right-click the link and choose 'Save Link As...'\n\n**On Mobile:** Long-press the link and choose 'Download link'", icon="ℹ️")
-    
-    download_filename = f"compressed_{uploaded_file.name}"
-    # Generate and display the custom HTML download link
-    download_link = create_download_link(st.session_state.pdf_result, download_filename)
-    st.markdown(download_link, unsafe_allow_html=True)
+
+    # This is a standard button that triggers the JavaScript download
+    if st.button("⬇️ Download Now"):
+        trigger_download(st.session_state.pdf_result, st.session_state.file_name)
