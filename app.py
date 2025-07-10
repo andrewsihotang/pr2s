@@ -3,16 +3,24 @@ import subprocess
 import os
 import tempfile
 import uuid
+import base64
 
-# --- State Management: Initialize the session state key ---
-if 'pdf_bytes' not in st.session_state:
-    st.session_state.pdf_bytes = None
+# --- Helper Function for Creating a Download Link ---
+def create_download_link(val, filename):
+    """
+    Generates a download link for a file from its bytes.
+    """
+    # Encode the bytes to Base64
+    b64 = base64.b64encode(val).decode()
+    # Create the HTML link tag
+    return f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}">⬇️ Download Your Compressed PDF</a>'
 
 # --- Main Functions ---
 TEMP_DIR = tempfile.gettempdir()
 
-def compress_pdf(input_path, output_path, quality):
-    """Compresses a PDF using Ghostscript and returns success status."""
+def compress_pdf(input_path, quality):
+    """Compresses a PDF and returns the resulting bytes."""
+    output_path = os.path.join(TEMP_DIR, f"compressed_{uuid.uuid4().hex}.pdf")
     ghostscript_path = 'gs'
     command = [
         ghostscript_path, '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4',
@@ -21,72 +29,53 @@ def compress_pdf(input_path, output_path, quality):
     ]
     try:
         subprocess.run(command, check=True, capture_output=True, text=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        st.error("Ghostscript failed during compression.")
-        st.code(f"Error from Ghostscript:\n{e.stderr}")
-        return False
-    except FileNotFoundError:
-        st.error("Ghostscript command 'gs' not found. App might be misconfigured.")
-        return False
+        with open(output_path, "rb") as f:
+            file_bytes = f.read()
+        os.remove(output_path) # Clean up
+        return file_bytes
+    except Exception as e:
+        st.error(f"An error occurred during compression: {e}")
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        return None
 
 # --- Streamlit App Interface ---
 st.set_page_config(layout="centered", page_title="PDF Pro")
 st.title("📄 PDF Compressor")
 
-# We create two columns to separate the uploader and the download button
-col1, col2 = st.columns([3, 2])
+# Initialize state
+if 'pdf_result' not in st.session_state:
+    st.session_state.pdf_result = None
 
-with col1:
-    uploaded_file = st.file_uploader(
-        "Upload a PDF to compress",
-        type=["pdf"]
-    )
+uploaded_file = st.file_uploader("Upload a PDF to compress", type=["pdf"])
 
 if uploaded_file:
-    # When a new file is uploaded, clear any previous result
-    if 'last_uploaded_id' not in st.session_state or st.session_state.last_uploaded_id != uploaded_file.file_id:
-        st.session_state.last_uploaded_id = uploaded_file.file_id
-        st.session_state.pdf_bytes = None
+    # Clear previous results when a new file is uploaded
+    if 'last_file_id' not in st.session_state or st.session_state.last_file_id != uploaded_file.file_id:
+        st.session_state.last_file_id = uploaded_file.file_id
+        st.session_state.pdf_result = None
 
     quality = st.selectbox(
         "Select Compression Quality",
         ('ebook', 'screen', 'printer', 'prepress'),
-        index=0,
         help="**ebook:** Good balance. **screen:** Smallest size."
     )
 
     if st.button("Compress PDF", type="primary"):
-        with st.spinner("Compressing..."):
-            unique_id = uuid.uuid4().hex
-            input_path = os.path.join(TEMP_DIR, f"{unique_id}_{uploaded_file.name}")
-            output_path = os.path.join(TEMP_DIR, f"compressed_{unique_id}.pdf")
+        input_path = os.path.join(TEMP_DIR, uploaded_file.name)
+        with open(input_path, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        with st.spinner("Compressing... This may take a moment."):
+            # Store the result directly in session state
+            st.session_state.pdf_result = compress_pdf(input_path, quality)
+        
+        os.remove(input_path) # Clean up
 
-            with open(input_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-
-            success = compress_pdf(input_path, output_path, quality)
-
-            if success:
-                with open(output_path, "rb") as f:
-                    # **THE FIX: Store result directly in session state**
-                    st.session_state.pdf_bytes = f.read()
-                st.success("✅ Compression successful!")
-            
-            # Clean up temporary files
-            if os.path.exists(input_path):
-                os.remove(input_path)
-            if os.path.exists(output_path):
-                os.remove(output_path)
-
-# The download button is now in the second column and checks the state
-with col2:
-    if st.session_state.pdf_bytes:
-        st.write("### Your file is ready!")
-        st.download_button(
-            label="⬇️ Download Compressed PDF",
-            data=st.session_state.pdf_bytes,
-            file_name=f"compressed_{uploaded_file.name}",
-            mime="application/pdf",
-            type="primary"
-        )
+# Display the download link if compression was successful
+if st.session_state.pdf_result:
+    st.success("✅ Compression successful! Click the link below to download.")
+    download_filename = f"compressed_{uploaded_file.name}"
+    # Generate and display the custom HTML download link
+    download_link = create_download_link(st.session_state.pdf_result, download_filename)
+    st.markdown(download_link, unsafe_allow_html=True)
