@@ -10,10 +10,9 @@ def create_download_link(val, filename):
     """
     Generates a download link for a file from its bytes.
     """
-    # Encode the bytes to Base64
     b64 = base64.b64encode(val).decode()
-    # Create the HTML link tag
-    return f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}">⬇️ Download Your Compressed PDF</a>'
+    # **THE FIX IS HERE:** The MIME type is now 'application/pdf'
+    return f'<a href="data:application/pdf;base64,{b64}" download="{filename}">⬇️ Download Your Compressed PDF</a>'
 
 # --- Main Functions ---
 TEMP_DIR = tempfile.gettempdir()
