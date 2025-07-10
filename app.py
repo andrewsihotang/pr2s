@@ -4,13 +4,9 @@ import os
 import tempfile
 import uuid
 
-# --- State Management ---
-# Initialize session state variables to None if they don't exist.
-# This is crucial for the app's logic.
+# --- State Management: Initialize the session state key ---
 if 'pdf_bytes' not in st.session_state:
     st.session_state.pdf_bytes = None
-if 'file_name' not in st.session_state:
-    st.session_state.file_name = None
 
 # --- Main Functions ---
 TEMP_DIR = tempfile.gettempdir()
@@ -31,63 +27,66 @@ def compress_pdf(input_path, output_path, quality):
         st.code(f"Error from Ghostscript:\n{e.stderr}")
         return False
     except FileNotFoundError:
-        st.error("Ghostscript command 'gs' not found. The app is likely misconfigured.")
+        st.error("Ghostscript command 'gs' not found. App might be misconfigured.")
         return False
 
 # --- Streamlit App Interface ---
-st.set_page_config(layout="centered", page_title="My PDF Compressor", page_icon="📄")
-st.title("📄 My Personal PDF Compressor")
-st.write("Upload a PDF, choose a compression level, and get your smaller file.")
+st.set_page_config(layout="centered", page_title="PDF Pro")
+st.title("📄 PDF Compressor")
 
-uploaded_file = st.file_uploader(
-    "Upload a PDF file",
-    type=["pdf"],
-    # When a new file is uploaded, clear any old compressed data
-    on_change=lambda: st.session_state.update(pdf_bytes=None, file_name=None)
-)
+# We create two columns to separate the uploader and the download button
+col1, col2 = st.columns([3, 2])
 
-if uploaded_file is not None:
-    st.markdown("---")
+with col1:
+    uploaded_file = st.file_uploader(
+        "Upload a PDF to compress",
+        type=["pdf"]
+    )
+
+if uploaded_file:
+    # When a new file is uploaded, clear any previous result
+    if 'last_uploaded_id' not in st.session_state or st.session_state.last_uploaded_id != uploaded_file.file_id:
+        st.session_state.last_uploaded_id = uploaded_file.file_id
+        st.session_state.pdf_bytes = None
+
     quality = st.selectbox(
         "Select Compression Quality",
         ('ebook', 'screen', 'printer', 'prepress'),
         index=0,
-        help="**ebook:** Good balance (Recommended). **screen:** Smallest size."
+        help="**ebook:** Good balance. **screen:** Smallest size."
     )
-    
+
     if st.button("Compress PDF", type="primary"):
-        # Create unique file paths for processing
-        unique_id = uuid.uuid4().hex
-        input_path = os.path.join(TEMP_DIR, f"{unique_id}_{uploaded_file.name}")
-        output_path = os.path.join(TEMP_DIR, f"compressed_{unique_id}.pdf")
+        with st.spinner("Compressing..."):
+            unique_id = uuid.uuid4().hex
+            input_path = os.path.join(TEMP_DIR, f"{unique_id}_{uploaded_file.name}")
+            output_path = os.path.join(TEMP_DIR, f"compressed_{unique_id}.pdf")
 
-        # Save uploaded file to disk for Ghostscript to access
-        with open(input_path, "wb") as f:
-            f.write(uploaded_file.getbuffer())
+            with open(input_path, "wb") as f:
+                f.write(uploaded_file.getbuffer())
 
-        with st.spinner("Compressing your PDF..."):
             success = compress_pdf(input_path, output_path, quality)
-            
+
             if success:
-                # Read the compressed file's data into memory
                 with open(output_path, "rb") as f:
-                    compressed_bytes = f.read()
-                
-                # **THE FIX: Store the data and filename in session state**
-                st.session_state.pdf_bytes = compressed_bytes
-                st.session_state.file_name = f"compressed_{uploaded_file.name}"
-                
+                    # **THE FIX: Store result directly in session state**
+                    st.session_state.pdf_bytes = f.read()
                 st.success("✅ Compression successful!")
             
-            # Clean up the temporary files from the server
-            os.remove(input_path)
-            os.remove(output_path)
+            # Clean up temporary files
+            if os.path.exists(input_path):
+                os.remove(input_path)
+            if os.path.exists(output_path):
+                os.remove(output_path)
 
-# **Display the download button ONLY if there's data in the session state**
-if st.session_state.pdf_bytes:
-    st.download_button(
-        label="⬇️ Download Compressed PDF",
-        data=st.session_state.pdf_bytes,
-        file_name=st.session_state.file_name,
-        mime="application/pdf"
-    )
+# The download button is now in the second column and checks the state
+with col2:
+    if st.session_state.pdf_bytes:
+        st.write("### Your file is ready!")
+        st.download_button(
+            label="⬇️ Download Compressed PDF",
+            data=st.session_state.pdf_bytes,
+            file_name=f"compressed_{uploaded_file.name}",
+            mime="application/pdf",
+            type="primary"
+        )
